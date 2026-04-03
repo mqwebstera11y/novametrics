@@ -1,9 +1,11 @@
 # Databricks notebook source
-# Load secrets from workspace notebook — never committed to git
-%run "/Workspace/Users/config_secrets"
+import json
 
-# TMDB_API_KEY is now available as a variable
-# print("TMDB key loaded:", TMDB_API_KEY[:6] + "...")
+_secrets = json.loads(
+    dbutils.fs.head("dbfs:/Workspace/Users/mqwebster238@gmail.com/secrets.json")
+)
+TMDB_API_KEY = _secrets["TMDB_API_KEY"]
+# 
 
 # COMMAND ----------
 
