@@ -26,7 +26,9 @@ import pandas as pd
 import requests
 
 # Make src/ importable when running from the repo root or from notebooks/
-_repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# __file__ is set when running as a script; fall back to cwd (Databricks / interactive)
+_this_file = globals().get("__file__") or os.path.join(os.getcwd(), "notebooks", "placeholder")
+_repo_root = os.path.abspath(os.path.join(os.path.dirname(_this_file), ".."))
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
