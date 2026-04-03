@@ -1,14 +1,15 @@
 """
 02_job1_embeddings.py — Job 1: Build Content-Based Embeddings & FAISS Index
 
-Inputs:
-    /Volumes/movie_recsys/data/outputs/meta_clean.parquet
+Inputs  (already on disk from EDA / Job 0):
+    /Volumes/movie_recsys/data/outputs/meta_clean.parquet      748,224 rows, key=parent_asin
+    /Volumes/movie_recsys/data/outputs/reviews_5core.parquet   7,569,072 rows, key=parent_asin
 
 Outputs:
-    /Volumes/movie_recsys/data/outputs/tmdb_enriched.parquet  (checkpoint)
-    /Volumes/movie_recsys/data/outputs/embeddings.npy
-    /Volumes/movie_recsys/data/outputs/asin_index.npy
-    /Volumes/movie_recsys/data/outputs/faiss_index.bin
+    /Volumes/movie_recsys/data/outputs/tmdb_enriched.parquet   checkpoint — Tier 4 enrichment
+    /Volumes/movie_recsys/data/outputs/embeddings.npy          float32 (n_items, 384)
+    /Volumes/movie_recsys/data/outputs/asin_index.npy          parent_asin lookup aligned to embeddings
+    /Volumes/movie_recsys/data/outputs/faiss_index.bin         IVF-Flat index
 
 Resumable: re-running skips any stage whose output file already exists.
 
@@ -25,12 +26,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-# Make src/ importable when running from the repo root or from notebooks/
-# __file__ is set when running as a script; fall back to cwd (Databricks / interactive)
-_this_file = globals().get("__file__") or os.path.join(os.getcwd(), "notebooks", "placeholder")
-_repo_root = os.path.abspath(os.path.join(os.path.dirname(_this_file), ".."))
-if _repo_root not in sys.path:
-    sys.path.insert(0, _repo_root)
+sys.path.append("/Volumes/movie_recsys/repo")
 
 from src.features import build_embedding_input, get_embedding_tier
 from src.model_cb import build_faiss_index, save_index, load_index, query_index
@@ -43,6 +39,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 OUTPUTS_DIR       = "/Volumes/movie_recsys/data/outputs"
 META_CLEAN_PATH   = f"{OUTPUTS_DIR}/meta_clean.parquet"
+REVIEWS_PATH      = f"{OUTPUTS_DIR}/reviews_5core.parquet"
 TMDB_CHECKPOINT   = f"{OUTPUTS_DIR}/tmdb_enriched.parquet"
 EMBEDDINGS_PATH   = f"{OUTPUTS_DIR}/embeddings.npy"
 ASIN_INDEX_PATH   = f"{OUTPUTS_DIR}/asin_index.npy"
@@ -65,23 +62,46 @@ SPOT_CHECK_K      = 5
 
 
 # ---------------------------------------------------------------------------
-# Step 1 — Load metadata
+# Step 1 — Load meta_clean and reconstruct meta_with_review
+#   meta_clean.parquet does not contain review text.
+#   most_helpful is derived from reviews_5core at runtime (not persisted).
+#   Join key is parent_asin throughout — `asin` does not exist in either file.
 # ---------------------------------------------------------------------------
-log.info("Loading metadata from %s", META_CLEAN_PATH)
+log.info("Loading meta_clean from %s", META_CLEAN_PATH)
 meta = pd.read_parquet(META_CLEAN_PATH)
-log.info("Loaded %d items. Columns: %s", len(meta), list(meta.columns))
+assert "parent_asin" in meta.columns, "Expected parent_asin in meta_clean.parquet"
+log.info("meta_clean: %d rows", len(meta))
 
-assert "asin" in meta.columns, (
-    "Expected 'asin' column in meta_clean.parquet (parent_asin fix applied in EDA)"
+log.info("Loading reviews from %s", REVIEWS_PATH)
+reviews = pd.read_parquet(REVIEWS_PATH, columns=["parent_asin", "helpful_vote", "text"])
+log.info("reviews_5core: %d rows", len(reviews))
+
+# Reconstruct most_helpful: top helpful_vote text per item (mirrors EDA logic)
+log.info("Building most_helpful_review per item …")
+most_helpful = (
+    reviews
+    .sort_values("helpful_vote", ascending=False)
+    .groupby("parent_asin", as_index=False)
+    .first()[["parent_asin", "text"]]
+    .rename(columns={"text": "most_helpful_review"})
 )
+del reviews   # free ~1 GB
+log.info("most_helpful: %d items, %d with review text",
+         len(most_helpful), most_helpful["most_helpful_review"].notna().sum())
 
-for col in ["title", "genres", "description", "review_text"]:
-    if col in meta.columns:
-        meta[col] = meta[col].where(meta[col].notna(), other=None)
+# Join → meta_with_review  (748,224 rows, left join keeps all meta items)
+meta = meta.merge(most_helpful, on="parent_asin", how="left")
+log.info("meta_with_review: %d rows, columns: %s", len(meta), list(meta.columns))
+
+# Normalise NaN → None so _is_present() works correctly downstream
+for col in ["title", "genres_str", "description_str", "most_helpful_review"]:
+    meta[col] = meta[col].where(meta[col].notna(), other=None)
 
 
 # ---------------------------------------------------------------------------
 # Step 2 — TMDB enrichment for Tier 4 items
+#   Tier 4 = build_embedding_input returns None (no title+genres to work with).
+#   Checkpoint skips the ~134-min API loop on re-runs.
 # ---------------------------------------------------------------------------
 def _fetch_tmdb(title: str, api_key: str, session: requests.Session) -> dict | None:
     try:
@@ -97,9 +117,9 @@ def _fetch_tmdb(title: str, api_key: str, session: requests.Session) -> dict | N
         top = results[0]
         genre_str = "|".join(str(g) for g in top.get("genre_ids", []))
         return {
-            "title": top.get("title", ""),
+            "title":       top.get("title", ""),
             "description": top.get("overview", ""),
-            "genres": genre_str,
+            "genres":      genre_str,
         }
     except Exception as exc:  # noqa: BLE001
         log.warning("TMDB fetch failed for title '%s': %s", title, exc)
@@ -109,17 +129,17 @@ def _fetch_tmdb(title: str, api_key: str, session: requests.Session) -> dict | N
 def run_tmdb_enrichment(tier4_df: pd.DataFrame, api_key: str) -> pd.DataFrame:
     records = []
     session = requests.Session()
-    total = len(tier4_df)
+    total   = len(tier4_df)
 
     for i, (_, row) in enumerate(tier4_df.iterrows()):
         if i % 500 == 0:
             log.info("TMDB enrichment: %d / %d (%.1f%%)", i, total, 100 * i / max(total, 1))
         result = _fetch_tmdb(row["title"] or "", api_key, session)
         records.append({
-            "asin": row["asin"],
-            "tmdb_title": result["title"] if result else None,
+            "parent_asin":      row["parent_asin"],
+            "tmdb_title":       result["title"]       if result else None,
             "tmdb_description": result["description"] if result else None,
-            "tmdb_genres": result["genres"] if result else None,
+            "tmdb_genres":      result["genres"]      if result else None,
         })
         time.sleep(TMDB_SLEEP)
 
@@ -127,19 +147,18 @@ def run_tmdb_enrichment(tier4_df: pd.DataFrame, api_key: str) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
+# Identify Tier 4 before any enrichment
 meta["_emb_input"] = meta.apply(
     lambda r: build_embedding_input(
-        r.get("title"), r.get("genres"), r.get("description"), r.get("review_text"),
+        r["title"], r["genres_str"], r["description_str"], r["most_helpful_review"],
         max_review_words=MAX_REVIEW_WORDS,
     ),
     axis=1,
 )
 tier4_mask = meta["_emb_input"].isna()
 tier4_df   = meta[tier4_mask].copy()
-log.info(
-    "Tier 4 items (need TMDB): %d / %d (%.1f%%)",
-    len(tier4_df), len(meta), 100 * len(tier4_df) / len(meta),
-)
+log.info("Tier 4 items (need TMDB): %d / %d (%.1f%%)",
+         len(tier4_df), len(meta), 100 * len(tier4_df) / len(meta))
 
 if os.path.exists(TMDB_CHECKPOINT):
     log.info("TMDB checkpoint found — skipping API loop.")
@@ -158,7 +177,7 @@ else:
 
 
 # ---------------------------------------------------------------------------
-# Step 3 — Merge TMDB enrichment back into metadata
+# Step 3 — Merge TMDB enrichment, coalesce into final columns
 # ---------------------------------------------------------------------------
 def _is_present(v) -> bool:
     return bool(v and str(v).strip())
@@ -168,10 +187,11 @@ def _coalesce(primary, fallback):
     return primary if _is_present(primary) else (fallback if _is_present(fallback) else None)
 
 
-meta = meta.merge(tmdb_enriched, on="asin", how="left")
-meta["title_final"]       = meta.apply(lambda r: _coalesce(r.get("title"),       r.get("tmdb_title")),       axis=1)
-meta["genres_final"]      = meta.apply(lambda r: _coalesce(r.get("genres"),      r.get("tmdb_genres")),      axis=1)
-meta["description_final"] = meta.apply(lambda r: _coalesce(r.get("description"), r.get("tmdb_description")), axis=1)
+meta = meta.merge(tmdb_enriched, on="parent_asin", how="left")
+
+meta["title_final"]       = meta.apply(lambda r: _coalesce(r["title"],           r.get("tmdb_title")),       axis=1)
+meta["genres_final"]      = meta.apply(lambda r: _coalesce(r["genres_str"],      r.get("tmdb_genres")),      axis=1)
+meta["description_final"] = meta.apply(lambda r: _coalesce(r["description_str"], r.get("tmdb_description")), axis=1)
 
 log.info(
     "Post-TMDB coverage — title: %.1f%%, genres: %.1f%%, description: %.1f%%",
@@ -186,16 +206,16 @@ log.info(
 # ---------------------------------------------------------------------------
 meta["embedding_input"] = meta.apply(
     lambda r: build_embedding_input(
-        r.get("title_final"), r.get("genres_final"),
-        r.get("description_final"), r.get("review_text"),
+        r["title_final"], r["genres_final"],
+        r["description_final"], r["most_helpful_review"],
         max_review_words=MAX_REVIEW_WORDS,
     ),
     axis=1,
 )
 meta["embedding_tier"] = meta.apply(
     lambda r: get_embedding_tier(
-        r.get("title_final"), r.get("genres_final"),
-        r.get("description_final"), r.get("review_text"),
+        r["title_final"], r["genres_final"],
+        r["description_final"], r["most_helpful_review"],
     ),
     axis=1,
 )
@@ -217,7 +237,7 @@ if os.path.exists(EMBEDDINGS_PATH) and os.path.exists(ASIN_INDEX_PATH):
     log.info("Embeddings checkpoint found — skipping embedding generation.")
     all_embeddings = np.load(EMBEDDINGS_PATH)
     all_asins      = np.load(ASIN_INDEX_PATH, allow_pickle=True)
-    log.info("Loaded embeddings shape %s, %d ASINs", all_embeddings.shape, len(all_asins))
+    log.info("Loaded embeddings shape %s, %d items", all_embeddings.shape, len(all_asins))
     total_time = None
 else:
     from sentence_transformers import SentenceTransformer
@@ -226,7 +246,7 @@ else:
     model = SentenceTransformer(EMBEDDING_MODEL)
 
     texts     = embeddable["embedding_input"].tolist()
-    asins     = embeddable["asin"].tolist()
+    asins     = embeddable["parent_asin"].tolist()
     n         = len(texts)
     n_batches = (n + BATCH_SIZE - 1) // BATCH_SIZE
 
@@ -298,8 +318,8 @@ for seed_title in SPOT_CHECK_TITLES:
     if matches.empty:
         log.info("  '%s': not found — skipping", seed_title)
         continue
-    seed_row  = matches.iloc[0]
-    seed_idx  = asin_to_idx.get(seed_row["asin"])
+    seed_row = matches.iloc[0]
+    seed_idx = asin_to_idx.get(seed_row["parent_asin"])
     if seed_idx is None:
         continue
     distances, indices = query_index(
