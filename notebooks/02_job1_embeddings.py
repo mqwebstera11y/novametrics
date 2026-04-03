@@ -1,4 +1,12 @@
 # Databricks notebook source
+# Load secrets from workspace notebook — never committed to git
+%run "/Workspace/Users/config_secrets"
+
+# TMDB_API_KEY is now available as a variable
+# print("TMDB key loaded:", TMDB_API_KEY[:6] + "...")
+
+# COMMAND ----------
+
 # COMMAND ----------
 # MAGIC 
 %pip install sentence-transformers faiss-cpu tqdm requests
