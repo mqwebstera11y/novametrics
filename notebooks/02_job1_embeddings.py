@@ -16,6 +16,35 @@ Usage:
     python notebooks/02_job1_embeddings.py
 """
 
+# Databricks notebook source
+import json
+
+_secrets = json.loads(
+    dbutils.fs.head("dbfs:/Workspace/Users/mqwebster238@gmail.com/secrets.json")
+)
+TMDB_API_KEY = _secrets["TMDB_API_KEY"]
+# 
+
+%pip install sentence-transformers faiss-cpu tqdm requests
+
+"""
+02_job1_embeddings.py — Job 1: Build Content-Based Embeddings & FAISS Index
+
+Inputs:
+    /Volumes/movie_recsys/data/outputs/meta_clean.parquet
+
+Outputs:
+    /Volumes/movie_recsys/data/outputs/tmdb_enriched.parquet  (checkpoint)
+    /Volumes/movie_recsys/data/outputs/embeddings.npy
+    /Volumes/movie_recsys/data/outputs/asin_index.npy
+    /Volumes/movie_recsys/data/outputs/faiss_index.bin
+
+Resumable: re-running skips any stage whose output file already exists.
+
+Usage:
+    python notebooks/02_job1_embeddings.py
+"""
+
 import os
 import sys
 import time
@@ -32,8 +61,12 @@ _repo_root = os.path.abspath(os.path.join(os.path.dirname(_this_file), ".."))
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
-from src.features import build_embedding_input, get_embedding_tier
-from src.model_cb import build_faiss_index, save_index, load_index, query_index
+import sys
+sys.path.append('/Workspace/Users/mqwebster238@gmail.com/novametrics/src/')
+
+
+from  features import build_embedding_input, get_embedding_tier
+from  model_cb import build_faiss_index, save_index, load_index, query_index
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -56,7 +89,7 @@ MAX_REVIEW_WORDS  = 256        # CONFIG PARAM — word cap on review text
 CHECKPOINT_EVERY  = 50         # save embeddings.npy every N batches
 LOG_EVERY         = 10         # progress log every N batches
 
-TMDB_API_KEY      = os.environ.get("TMDB_API_KEY")   # never hardcode
+
 TMDB_SEARCH_URL   = "https://api.themoviedb.org/3/search/movie"
 TMDB_SLEEP        = 1.0 / 40  # 40 req/s free-tier rate limit
 
@@ -70,6 +103,10 @@ SPOT_CHECK_K      = 5
 log.info("Loading metadata from %s", META_CLEAN_PATH)
 meta = pd.read_parquet(META_CLEAN_PATH)
 log.info("Loaded %d items. Columns: %s", len(meta), list(meta.columns))
+
+meta['asin'] = meta['parent_asin']
+
+
 
 assert "asin" in meta.columns, (
     "Expected 'asin' column in meta_clean.parquet (parent_asin fix applied in EDA)"
