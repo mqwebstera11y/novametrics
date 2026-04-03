@@ -1,4 +1,7 @@
 # Databricks notebook source
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC # Job 1 — Build Content-Based Embeddings & FAISS Index
 # MAGIC
@@ -27,8 +30,11 @@
 # MAGIC   50 × 512 = 25,600 items of work.
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Cell 1 — Imports & Config
+
+# COMMAND ----------
 
 import os
 import sys
@@ -78,8 +84,11 @@ SPOT_CHECK_TITLES  = ["The Dark Knight", "Toy Story", "The Godfather"]
 SPOT_CHECK_K       = 5
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Cell 2 — Load meta_clean.parquet
+
+# COMMAND ----------
 
 log.info("Loading metadata from %s", META_CLEAN_PATH)
 meta = pd.read_parquet(META_CLEAN_PATH)
@@ -94,8 +103,11 @@ for col in ["title", "genres", "description", "review_text"]:
         meta[col] = meta[col].where(meta[col].notna(), other=None)
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Cell 3 — TMDB Enrichment for Tier 4 Items
+
+# COMMAND ----------
 
 def _fetch_tmdb(title: str, api_key: str, session: requests.Session) -> dict | None:
     """
@@ -183,20 +195,26 @@ else:
     log.info("TMDB checkpoint saved to %s", TMDB_CHECKPOINT)
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Cell 4 — Merge TMDB Enrichment Back into Metadata
 
+# COMMAND ----------
+
 meta = meta.merge(tmdb_enriched, on="asin", how="left")
 
+
 # For Tier 4 rows: fill missing fields from TMDB columns
+def _is_present_val(v) -> bool:
+    return bool(v and str(v).strip())
+
+
 def _coalesce(primary, fallback):
     """Return primary if present, else fallback."""
     if _is_present_val(primary):
         return primary
     return fallback if _is_present_val(fallback) else None
 
-def _is_present_val(v) -> bool:
-    return bool(v and str(v).strip())
 
 meta["title_final"]       = meta.apply(lambda r: _coalesce(r.get("title"),       r.get("tmdb_title")),       axis=1)
 meta["genres_final"]      = meta.apply(lambda r: _coalesce(r.get("genres"),      r.get("tmdb_genres")),      axis=1)
@@ -210,8 +228,11 @@ log.info(
 )
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Cell 5 — Build Embedding Input Strings & Report Tier Distribution
+
+# COMMAND ----------
 
 meta["embedding_input"] = meta.apply(
     lambda r: build_embedding_input(
@@ -250,8 +271,11 @@ embeddable = meta[~true_gaps].reset_index(drop=True)
 log.info("Items to embed: %d", len(embeddable))
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Cell 6 — Generate Embeddings in Batches
+
+# COMMAND ----------
 
 if os.path.exists(EMBEDDINGS_PATH) and os.path.exists(ASIN_INDEX_PATH):
     log.info(
@@ -267,9 +291,9 @@ else:
     log.info("Loading sentence-transformer model: %s", EMBEDDING_MODEL)
     model = SentenceTransformer(EMBEDDING_MODEL)
 
-    texts  = embeddable["embedding_input"].tolist()
-    asins  = embeddable["asin"].tolist()
-    n      = len(texts)
+    texts     = embeddable["embedding_input"].tolist()
+    asins     = embeddable["asin"].tolist()
+    n         = len(texts)
     n_batches = (n + BATCH_SIZE - 1) // BATCH_SIZE
 
     log.info(
@@ -323,11 +347,16 @@ else:
     )
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Cell 7 — Build FAISS Index
 
-log.info("Building FAISS IVF-Flat index: n_items=%d, dim=%d, n_clusters=%d",
-         len(all_embeddings), EMBEDDING_DIM, N_CLUSTERS)
+# COMMAND ----------
+
+log.info(
+    "Building FAISS IVF-Flat index: n_items=%d, dim=%d, n_clusters=%d",
+    len(all_embeddings), EMBEDDING_DIM, N_CLUSTERS,
+)
 
 index = build_faiss_index(all_embeddings, n_clusters=N_CLUSTERS)
 save_index(index, FAISS_INDEX_PATH)
@@ -338,8 +367,11 @@ log.info(
 )
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Cell 8 — Validation
+
+# COMMAND ----------
 
 # Reload to prove round-trip serialisation works
 index = load_index(FAISS_INDEX_PATH)
@@ -350,21 +382,19 @@ assert index.ntotal == len(all_embeddings), (
 log.info("Index integrity check passed: ntotal=%d", index.ntotal)
 
 # Build ASIN → row-index lookup and title lookup for spot-checks
-asin_to_idx   = {asin: i for i, asin in enumerate(all_asins)}
-# Use the full meta for title lookup (covers both embedded and gap items)
-idx_to_title  = embeddable["title_final"].fillna("(unknown)").to_dict()
+asin_to_idx  = {asin: i for i, asin in enumerate(all_asins)}
+idx_to_title = embeddable["title_final"].fillna("(unknown)").to_dict()
 
 log.info("\n── Spot-check: top-%d neighbours ──────────────────────────────", SPOT_CHECK_K)
 for seed_title in SPOT_CHECK_TITLES:
-    # Find the first item whose title_final matches the seed
     matches = embeddable[embeddable["title_final"].str.contains(seed_title, case=False, na=False)]
     if matches.empty:
         log.info("Seed '%s': not found in embeddable items — skipping.", seed_title)
         continue
 
-    seed_row   = matches.iloc[0]
-    seed_asin  = seed_row["asin"]
-    seed_idx   = asin_to_idx.get(seed_asin)
+    seed_row  = matches.iloc[0]
+    seed_asin = seed_row["asin"]
+    seed_idx  = asin_to_idx.get(seed_asin)
     if seed_idx is None:
         log.info("Seed '%s' (ASIN %s): index position not found — skipping.", seed_title, seed_asin)
         continue
@@ -381,19 +411,27 @@ for seed_title in SPOT_CHECK_TITLES:
     log.info("")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Cell 9 — Summary Report
+
+# COMMAND ----------
 
 tier_summary = meta["embedding_tier"].value_counts().sort_index().to_dict()
 embedding_time_label = f"{total_time:.1f} s" if "total_time" in dir() else "N/A (loaded from checkpoint)"
 index_size_mb = os.path.getsize(FAISS_INDEX_PATH) / (1024 ** 2) if os.path.exists(FAISS_INDEX_PATH) else 0
 
+tier_labels = {
+    1: "Full (title+genres+desc+review)",
+    2: "Good (title+genres+desc)",
+    3: "Thin (title+genres)",
+    4: "Bridge (TMDB)",
+}
+
 log.info("═" * 60)
 log.info("JOB 1 SUMMARY")
 log.info("═" * 60)
 log.info("Items by embedding tier:")
-tier_labels = {1: "Full (title+genres+desc+review)", 2: "Good (title+genres+desc)",
-               3: "Thin (title+genres)", 4: "Bridge (TMDB)"}
 for t, count in tier_summary.items():
     log.info("  Tier %d — %-35s : %6d (%.1f%%)", t, tier_labels.get(t, ""), count, 100 * count / len(meta))
 log.info("Total items embedded : %d", index.ntotal)
