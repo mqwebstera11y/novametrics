@@ -104,14 +104,7 @@ log.info("Loading meta_clean from %s", META_CLEAN_PATH)
 meta = pd.read_parquet(META_CLEAN_PATH)
 log.info("Loaded %d items. Columns: %s", len(meta), list(meta.columns))
 
-meta['asin'] = meta['parent_asin']
 
-
-
-assert "asin" in meta.columns, (
-    "Expected 'asin' column in meta_clean.parquet (parent_asin fix applied in EDA)"
-)
-del reviews   # free ~1 GB
 log.info("most_helpful: %d items, %d with review text",
          len(most_helpful), most_helpful["most_helpful_review"].notna().sum())
 
