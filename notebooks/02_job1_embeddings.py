@@ -6,6 +6,7 @@ Inputs  (already on disk from EDA / Job 0):
     /Volumes/movie_recsys/data/outputs/reviews_5core.parquet   7,569,072 rows, key=parent_asin
 
 Outputs:
+    /Volumes/movie_recsys/data/outputs/most_helpful.parquet    checkpoint — 200K most-helpful reviews
     /Volumes/movie_recsys/data/outputs/tmdb_enriched.parquet   checkpoint — Tier 4 enrichment
     /Volumes/movie_recsys/data/outputs/embeddings.npy          float32 (n_items, 384)
     /Volumes/movie_recsys/data/outputs/asin_index.npy          parent_asin lookup aligned to embeddings
@@ -40,6 +41,7 @@ log = logging.getLogger(__name__)
 OUTPUTS_DIR       = "/Volumes/movie_recsys/data/outputs"
 META_CLEAN_PATH   = f"{OUTPUTS_DIR}/meta_clean.parquet"
 REVIEWS_PATH      = f"{OUTPUTS_DIR}/reviews_5core.parquet"
+MOST_HELPFUL_PATH = f"{OUTPUTS_DIR}/most_helpful.parquet"
 TMDB_CHECKPOINT   = f"{OUTPUTS_DIR}/tmdb_enriched.parquet"
 EMBEDDINGS_PATH   = f"{OUTPUTS_DIR}/embeddings.npy"
 ASIN_INDEX_PATH   = f"{OUTPUTS_DIR}/asin_index.npy"
@@ -63,8 +65,8 @@ SPOT_CHECK_K      = 5
 
 # ---------------------------------------------------------------------------
 # Step 1 — Load meta_clean and reconstruct meta_with_review
-#   meta_clean.parquet does not contain review text.
-#   most_helpful is derived from reviews_5core at runtime (not persisted).
+#   most_helpful is checkpointed to most_helpful.parquet after first build
+#   so the 7.5M-row reviews load is skipped on every subsequent run.
 #   Join key is parent_asin throughout — `asin` does not exist in either file.
 # ---------------------------------------------------------------------------
 log.info("Loading meta_clean from %s", META_CLEAN_PATH)
@@ -72,20 +74,25 @@ meta = pd.read_parquet(META_CLEAN_PATH)
 assert "parent_asin" in meta.columns, "Expected parent_asin in meta_clean.parquet"
 log.info("meta_clean: %d rows", len(meta))
 
-log.info("Loading reviews from %s", REVIEWS_PATH)
-reviews = pd.read_parquet(REVIEWS_PATH, columns=["parent_asin", "helpful_vote", "text"])
-log.info("reviews_5core: %d rows", len(reviews))
+if os.path.exists(MOST_HELPFUL_PATH):
+    log.info("most_helpful checkpoint found — skipping reviews load.")
+    most_helpful = pd.read_parquet(MOST_HELPFUL_PATH)
+else:
+    log.info("Loading reviews from %s", REVIEWS_PATH)
+    reviews = pd.read_parquet(REVIEWS_PATH, columns=["parent_asin", "helpful_vote", "text"])
+    log.info("reviews_5core: %d rows — building most_helpful …", len(reviews))
+    most_helpful = (
+        reviews
+        .sort_values("helpful_vote", ascending=False)
+        .groupby("parent_asin", as_index=False)
+        .first()[["parent_asin", "text"]]
+        .rename(columns={"text": "most_helpful_review"})
+    )
+    del reviews
+    os.makedirs(OUTPUTS_DIR, exist_ok=True)
+    most_helpful.to_parquet(MOST_HELPFUL_PATH, index=False)
+    log.info("most_helpful saved to %s", MOST_HELPFUL_PATH)
 
-# Reconstruct most_helpful: top helpful_vote text per item (mirrors EDA logic)
-log.info("Building most_helpful_review per item …")
-most_helpful = (
-    reviews
-    .sort_values("helpful_vote", ascending=False)
-    .groupby("parent_asin", as_index=False)
-    .first()[["parent_asin", "text"]]
-    .rename(columns={"text": "most_helpful_review"})
-)
-del reviews   # free ~1 GB
 log.info("most_helpful: %d items, %d with review text",
          len(most_helpful), most_helpful["most_helpful_review"].notna().sum())
 
