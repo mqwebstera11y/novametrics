@@ -102,7 +102,8 @@ log.info("meta_with_review: %d rows, columns: %s", len(meta), list(meta.columns)
 
 # Normalise NaN → None so _is_present() works correctly downstream
 for col in ["title", "genres_str", "description_str", "most_helpful_review"]:
-    meta[col] = meta[col].where(meta[col].notna(), other=None)
+    if col in meta.columns:
+        meta[col] = meta[col].where(meta[col].notna(), other=None)
 
 
 # ---------------------------------------------------------------------------
@@ -299,10 +300,14 @@ else:
 # ---------------------------------------------------------------------------
 # Step 6 — Build FAISS index
 # ---------------------------------------------------------------------------
+n_clusters_actual = min(N_CLUSTERS, len(all_embeddings))
+if n_clusters_actual < N_CLUSTERS:
+    log.warning("Reducing n_clusters from %d to %d to match embedding count",
+                N_CLUSTERS, n_clusters_actual)
 log.info("Building FAISS IVF-Flat index: n_items=%d, dim=%d, n_clusters=%d",
-         len(all_embeddings), EMBEDDING_DIM, N_CLUSTERS)
+         len(all_embeddings), EMBEDDING_DIM, n_clusters_actual)
 
-index = build_faiss_index(all_embeddings, n_clusters=N_CLUSTERS)
+index = build_faiss_index(all_embeddings, n_clusters=n_clusters_actual)
 save_index(index, FAISS_INDEX_PATH)
 log.info("FAISS index saved to %s | ntotal=%d", FAISS_INDEX_PATH, index.ntotal)
 
@@ -316,27 +321,32 @@ assert index.ntotal == len(all_embeddings), (
 )
 log.info("Index integrity check passed: ntotal=%d", index.ntotal)
 
-asin_to_idx  = {asin: i for i, asin in enumerate(all_asins)}
-idx_to_title = embeddable["title_final"].fillna("(unknown)").to_dict()
+# Build lookup by ASIN (not by integer position) so it stays correct
+# whether all_asins came from this run or a checkpoint from a previous run.
+asin_to_idx   = {asin: i for i, asin in enumerate(all_asins)}
+asin_to_title = meta.set_index("parent_asin")["title_final"].fillna("(unknown)").to_dict()
 
 log.info("Spot-check: top-%d neighbours", SPOT_CHECK_K)
 for seed_title in SPOT_CHECK_TITLES:
-    matches = embeddable[embeddable["title_final"].str.contains(seed_title, case=False, na=False)]
+    matches = meta[meta["title_final"].str.contains(seed_title, case=False, na=False)]
     if matches.empty:
-        log.info("  '%s': not found — skipping", seed_title)
+        log.info("  '%s': not found in metadata — skipping", seed_title)
         continue
-    seed_row = matches.iloc[0]
-    seed_idx = asin_to_idx.get(seed_row["parent_asin"])
+    seed_asin = matches.iloc[0]["parent_asin"]
+    seed_idx  = asin_to_idx.get(seed_asin)
     if seed_idx is None:
+        log.info("  '%s': not in embedded set — skipping", seed_title)
         continue
     distances, indices = query_index(
         index, all_embeddings[seed_idx : seed_idx + 1], k=SPOT_CHECK_K + 1
     )
-    log.info("  Seed: '%s'", seed_row["title_final"])
-    for rank, (dist, idx) in enumerate(zip(distances[0], indices[0])):
-        if idx == seed_idx:
+    log.info("  Seed: '%s' (%s)", asin_to_title.get(seed_asin, seed_asin), seed_asin)
+    for rank, (dist, neighbour_idx) in enumerate(zip(distances[0], indices[0])):
+        if neighbour_idx == seed_idx:
             continue
-        log.info("    %d. %s  [L2=%.4f]", rank, idx_to_title.get(int(idx), "(unknown)"), dist)
+        neighbour_asin  = all_asins[int(neighbour_idx)]
+        neighbour_title = asin_to_title.get(neighbour_asin, "(unknown)")
+        log.info("    %d. %s  [L2=%.4f]", rank, neighbour_title, dist)
 
 
 # ---------------------------------------------------------------------------
