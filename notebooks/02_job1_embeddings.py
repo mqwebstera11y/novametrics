@@ -13,39 +13,17 @@ Outputs:
     /Volumes/movie_recsys/data/outputs/faiss_index.bin         IVF-Flat index
 
 Resumable: re-running skips any stage whose output file already exists.
-
-Usage:
-    python notebooks/02_job1_embeddings.py
 """
 
 # Databricks notebook source
 import json
 
 _secrets = json.loads(
-    dbutils.fs.head("dbfs:/Workspace/Users/mqwebster238@gmail.com/secrets.json")
+    dbutils.fs.head("dbfs:/Workspace/Users/mqwebsters238@gmail.com/secrets.json")
 )
 TMDB_API_KEY = _secrets["TMDB_API_KEY"]
-# 
 
 %pip install sentence-transformers faiss-cpu tqdm requests
-
-"""
-02_job1_embeddings.py — Job 1: Build Content-Based Embeddings & FAISS Index
-
-Inputs:
-    /Volumes/movie_recsys/data/outputs/meta_clean.parquet
-
-Outputs:
-    /Volumes/movie_recsys/data/outputs/tmdb_enriched.parquet  (checkpoint)
-    /Volumes/movie_recsys/data/outputs/embeddings.npy
-    /Volumes/movie_recsys/data/outputs/asin_index.npy
-    /Volumes/movie_recsys/data/outputs/faiss_index.bin
-
-Resumable: re-running skips any stage whose output file already exists.
-
-Usage:
-    python notebooks/02_job1_embeddings.py
-"""
 
 import os
 import sys
@@ -56,14 +34,10 @@ import numpy as np
 import pandas as pd
 import requests
 
-sys.path.append("/Volumes/movie_recsys/repo")
+sys.path.append('/Workspace/Users/mqwebsters238@gmail.com/novametrics/src/')
 
-import sys
-sys.path.append('/Workspace/Users/mqwebster238@gmail.com/novametrics/src/')
-
-
-from  features import build_embedding_input, get_embedding_tier
-from  model_cb import build_faiss_index, save_index, load_index, query_index
+from features import build_embedding_input, get_embedding_tier
+from model_cb import build_faiss_index, save_index, load_index, query_index
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -88,24 +62,82 @@ MAX_REVIEW_WORDS  = 256        # CONFIG PARAM — word cap on review text
 CHECKPOINT_EVERY  = 50         # save embeddings.npy every N batches
 LOG_EVERY         = 10         # progress log every N batches
 
-
 TMDB_SEARCH_URL   = "https://api.themoviedb.org/3/search/movie"
 TMDB_SLEEP        = 1.0 / 40  # 40 req/s free-tier rate limit
 
 SPOT_CHECK_TITLES = ["The Dark Knight", "Toy Story", "The Godfather"]
 SPOT_CHECK_K      = 5
 
+# ---------------------------------------------------------------------------
+# String cleaning — applied after every load and merge
+#
+# Root cause of AttributeError: pandas fills missing strings with float NaN.
+# bool(NaN) is True in Python (NaN != 0), so a naive `value and value.strip()`
+# passes the guard and then crashes because floats have no .strip().
+#
+# _clean_str_cols coerces every string column to str | None immediately after
+# data enters the session, before any downstream function touches it.
+# ---------------------------------------------------------------------------
+_STR_COLS = [
+    "title", "genres_str", "description_str", "most_helpful_review",
+    "tmdb_title", "tmdb_description", "tmdb_genres",
+    "title_final", "genres_final", "description_final",
+]
+
+
+def _clean_str_cols(df: pd.DataFrame, cols: list = _STR_COLS) -> pd.DataFrame:
+    """
+    Coerce string columns to clean str | None in-place.
+
+    Handles:
+      - float NaN  (pandas default for missing strings)
+      - the string 'nan'  (str(NaN))
+      - empty / whitespace-only strings
+      - non-object dtypes (warns and coerces)
+
+    Applied after every pd.read_parquet() and every DataFrame merge.
+    """
+    for col in cols:
+        if col not in df.columns:
+            continue
+        if df[col].dtype != object:
+            log.warning("Column '%s' has dtype %s, expected str/object — coercing.", col, df[col].dtype)
+        df[col] = df[col].apply(
+            lambda v: None if (
+                v is None
+                or (isinstance(v, float) and pd.isna(v))
+                or str(v).strip().lower() == "nan"
+                or str(v).strip() == ""
+            ) else str(v).strip()
+        )
+    return df
+
+
+def _is_present(v) -> bool:
+    """Return True only for non-empty, non-NaN string values."""
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return False
+    s = str(v).strip()
+    return bool(s) and s.lower() != "nan"
+
+
+def _coalesce(primary, fallback):
+    """Return the first present value as a clean string, or None."""
+    if _is_present(primary):
+        return str(primary).strip()
+    if _is_present(fallback):
+        return str(fallback).strip()
+    return None
+
 
 # ---------------------------------------------------------------------------
 # Step 1 — Load meta_clean and reconstruct meta_with_review
-#   most_helpful is checkpointed to most_helpful.parquet after first build
-#   so the 7.5M-row reviews load is skipped on every subsequent run.
-#   Join key is parent_asin throughout — `asin` does not exist in either file.
 # ---------------------------------------------------------------------------
 log.info("Loading meta_clean from %s", META_CLEAN_PATH)
 meta = pd.read_parquet(META_CLEAN_PATH)
 assert "parent_asin" in meta.columns, "Expected parent_asin in meta_clean.parquet"
-log.info("meta_clean: %d rows", len(meta))
+_clean_str_cols(meta)
+log.info("meta_clean: %d rows | dtypes checked and string cols normalised", len(meta))
 
 if os.path.exists(MOST_HELPFUL_PATH):
     log.info("most_helpful checkpoint found — skipping reviews load.")
@@ -126,23 +158,18 @@ else:
     most_helpful.to_parquet(MOST_HELPFUL_PATH, index=False)
     log.info("most_helpful saved to %s", MOST_HELPFUL_PATH)
 
+_clean_str_cols(most_helpful, ["most_helpful_review"])
 log.info("most_helpful: %d items, %d with review text",
          len(most_helpful), most_helpful["most_helpful_review"].notna().sum())
 
-# Join → meta_with_review  (748,224 rows, left join keeps all meta items)
+# Join → meta_with_review (748,224 rows, left join keeps all meta items)
 meta = meta.merge(most_helpful, on="parent_asin", how="left")
-log.info("meta_with_review: %d rows, columns: %s", len(meta), list(meta.columns))
-
-# Normalise NaN → None so _is_present() works correctly downstream
-for col in ["title", "genres_str", "description_str", "most_helpful_review"]:
-    if col in meta.columns:
-        meta[col] = meta[col].where(meta[col].notna(), other=None)
+_clean_str_cols(meta)
+log.info("meta_with_review: %d rows | string cols normalised after merge", len(meta))
 
 
 # ---------------------------------------------------------------------------
 # Step 2 — TMDB enrichment for Tier 4 items
-#   Tier 4 = build_embedding_input returns None (no title+genres to work with).
-#   Checkpoint skips the ~134-min API loop on re-runs.
 # ---------------------------------------------------------------------------
 def _fetch_tmdb(title: str, api_key: str, session: requests.Session) -> dict | None:
     try:
@@ -207,8 +234,8 @@ if os.path.exists(TMDB_CHECKPOINT):
 else:
     if not TMDB_API_KEY:
         raise EnvironmentError(
-            "TMDB_API_KEY environment variable is not set. "
-            "Set it with: export TMDB_API_KEY=<your_token>"
+            "TMDB_API_KEY not found in secrets.json. "
+            "Add it at dbfs:/Workspace/Users/mqwebsters238@gmail.com/secrets.json"
         )
     log.info("Starting TMDB enrichment for %d items …", len(tier4_df))
     tmdb_enriched = run_tmdb_enrichment(tier4_df, TMDB_API_KEY)
@@ -216,23 +243,21 @@ else:
     tmdb_enriched.to_parquet(TMDB_CHECKPOINT, index=False)
     log.info("TMDB checkpoint saved to %s", TMDB_CHECKPOINT)
 
+_clean_str_cols(tmdb_enriched, ["tmdb_title", "tmdb_description", "tmdb_genres"])
+
 
 # ---------------------------------------------------------------------------
 # Step 3 — Merge TMDB enrichment, coalesce into final columns
 # ---------------------------------------------------------------------------
-def _is_present(v) -> bool:
-    return bool(v and str(v).strip())
-
-
-def _coalesce(primary, fallback):
-    return primary if _is_present(primary) else (fallback if _is_present(fallback) else None)
-
-
 meta = meta.merge(tmdb_enriched, on="parent_asin", how="left")
+_clean_str_cols(meta)   # normalise tmdb_* cols before coalescing
 
 meta["title_final"]       = meta.apply(lambda r: _coalesce(r["title"],           r.get("tmdb_title")),       axis=1)
 meta["genres_final"]      = meta.apply(lambda r: _coalesce(r["genres_str"],      r.get("tmdb_genres")),      axis=1)
 meta["description_final"] = meta.apply(lambda r: _coalesce(r["description_str"], r.get("tmdb_description")), axis=1)
+
+# Final normalisation pass on the coalesced columns
+_clean_str_cols(meta, ["title_final", "genres_final", "description_final"])
 
 log.info(
     "Post-TMDB coverage — title: %.1f%%, genres: %.1f%%, description: %.1f%%",
@@ -354,8 +379,6 @@ assert index.ntotal == len(all_embeddings), (
 )
 log.info("Index integrity check passed: ntotal=%d", index.ntotal)
 
-# Build lookup by ASIN (not by integer position) so it stays correct
-# whether all_asins came from this run or a checkpoint from a previous run.
 asin_to_idx   = {asin: i for i, asin in enumerate(all_asins)}
 asin_to_title = meta.set_index("parent_asin")["title_final"].fillna("(unknown)").to_dict()
 
