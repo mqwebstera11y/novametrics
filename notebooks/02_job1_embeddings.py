@@ -18,8 +18,10 @@ Resumable: re-running skips any stage whose output file already exists.
 # Databricks notebook source
 import json
 
+# Load secrets from workspace notebook — never committed to git
+
 _secrets = json.loads(
-    dbutils.fs.head("dbfs:/Workspace/Users/mqwebsters238@gmail.com/secrets.json")
+    dbutils.fs.head("dbfs:/Workspace/Users/mqwebster238@gmail.com/secrets.json")
 )
 TMDB_API_KEY = _secrets["TMDB_API_KEY"]
 
@@ -34,7 +36,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-sys.path.append('/Workspace/Users/mqwebsters238@gmail.com/novametrics/src/')
+sys.path.append('/Workspace/Users/mqwebster238@gmail.com/novametrics/src/')
 
 from features import build_embedding_input, get_embedding_tier
 from model_cb import build_faiss_index, save_index, load_index, query_index
