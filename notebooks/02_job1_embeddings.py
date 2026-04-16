@@ -58,7 +58,7 @@ FAISS_INDEX_PATH  = f"{OUTPUTS_DIR}/faiss_index.bin"
 
 EMBEDDING_MODEL   = "all-MiniLM-L6-v2"
 EMBEDDING_DIM     = 384
-BATCH_SIZE        = 1024       # OPTIMIZED: increased from 512 for faster encoding
+BATCH_SIZE        = 512        # CONFIG PARAM — safe for serverless CPU memory
 N_CLUSTERS        = 256        # CONFIG PARAM — IVF cells for FAISS
 MAX_REVIEW_WORDS  = 256        # CONFIG PARAM — word cap on review text
 CHECKPOINT_EVERY  = 50         # save embeddings.npy every N batches
