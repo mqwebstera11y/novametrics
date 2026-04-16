@@ -58,11 +58,14 @@ FAISS_INDEX_PATH  = f"{OUTPUTS_DIR}/faiss_index.bin"
 
 EMBEDDING_MODEL   = "all-MiniLM-L6-v2"
 EMBEDDING_DIM     = 384
-BATCH_SIZE        = 512        # CONFIG PARAM — safe for CPU memory
+BATCH_SIZE        = 1024       # OPTIMIZED: increased from 512 for faster encoding
 N_CLUSTERS        = 256        # CONFIG PARAM — IVF cells for FAISS
 MAX_REVIEW_WORDS  = 256        # CONFIG PARAM — word cap on review text
 CHECKPOINT_EVERY  = 50         # save embeddings.npy every N batches
 LOG_EVERY         = 10         # progress log every N batches
+
+# Set to True to ignore all checkpoints and regenerate from scratch
+FORCE_REGENERATE  = False
 
 TMDB_SEARCH_URL   = "https://api.themoviedb.org/3/search/movie"
 TMDB_SLEEP        = 1.0 / 40  # 40 req/s free-tier rate limit
@@ -141,7 +144,7 @@ assert "parent_asin" in meta.columns, "Expected parent_asin in meta_clean.parque
 _clean_str_cols(meta)
 log.info("meta_clean: %d rows | dtypes checked and string cols normalised", len(meta))
 
-if os.path.exists(MOST_HELPFUL_PATH):
+if not FORCE_REGENERATE and os.path.exists(MOST_HELPFUL_PATH):
     log.info("most_helpful checkpoint found — skipping reviews load.")
     most_helpful = pd.read_parquet(MOST_HELPFUL_PATH)
 else:
@@ -230,7 +233,7 @@ tier4_df   = meta[tier4_mask].copy()
 log.info("Tier 4 items (need TMDB): %d / %d (%.1f%%)",
          len(tier4_df), len(meta), 100 * len(tier4_df) / len(meta))
 
-if os.path.exists(TMDB_CHECKPOINT):
+if not FORCE_REGENERATE and os.path.exists(TMDB_CHECKPOINT):
     log.info("TMDB checkpoint found — skipping API loop.")
     tmdb_enriched = pd.read_parquet(TMDB_CHECKPOINT)
 else:
@@ -301,7 +304,7 @@ log.info("True gaps after TMDB: %d — skipped. Items to embed: %d", true_gaps.s
 # ---------------------------------------------------------------------------
 # Step 5 — Generate embeddings in batches (resumable)
 # ---------------------------------------------------------------------------
-if os.path.exists(EMBEDDINGS_PATH) and os.path.exists(ASIN_INDEX_PATH):
+if not FORCE_REGENERATE and os.path.exists(EMBEDDINGS_PATH) and os.path.exists(ASIN_INDEX_PATH):
     log.info("Embeddings checkpoint found — skipping embedding generation.")
     all_embeddings = np.load(EMBEDDINGS_PATH)
     all_asins      = np.load(ASIN_INDEX_PATH, allow_pickle=True)
