@@ -15,8 +15,17 @@ from __future__ import annotations
 
 
 def _is_present(value: str | None) -> bool:
-    """Return True if value is a non-empty, non-whitespace string."""
-    return bool(value and value.strip())
+    """Return True if value is a non-empty, non-whitespace string.
+
+    Explicitly rejects float NaN (pandas fills missing strings with NaN,
+    which is a float whose bool() is True — causing .strip() to crash).
+    """
+    if value is None:
+        return False
+    if isinstance(value, float):   # catches NaN; floats are never valid text
+        return False
+    s = str(value).strip()
+    return bool(s) and s.lower() != "nan"
 
 
 def _truncate_to_words(text: str, max_words: int) -> str:
