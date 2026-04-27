@@ -48,12 +48,22 @@ def test_tier1_output_contains_all_parts():
     assert "A superhero film." in result
     assert "Excellent!" in result
 
+# def test_tier2_output_no_review():
+#     result = build_embedding_input("The Dark Knight", "Action|Drama", "A superhero film.", None)
+#     assert result is not None
+#     assert "A superhero film." in result
+#     # Review should not be present
+#     assert result.count("|") == 2  # title | genres | description
+    
 def test_tier2_output_no_review():
     result = build_embedding_input("The Dark Knight", "Action|Drama", "A superhero film.", None)
     assert result is not None
     assert "A superhero film." in result
-    # Review should not be present
-    assert result.count("|") == 2  # title | genres | description
+    assert "The Dark Knight" in result
+    assert "Action|Drama" in result
+    # Tier 2 has no review — check by splitting on " | " separator
+    parts = result.split(" | ")
+    assert len(parts) == 3
 
 def test_tier3_output_title_genres():
     result = build_embedding_input("The Dark Knight", "Action", None, None)
