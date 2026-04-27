@@ -298,4 +298,10 @@ print("=" * 70)
 
 # COMMAND ----------
 
+import pandas as pd
+meta = pd.read_parquet("/Volumes/movie_recsys/data/outputs/meta_clean.parquet")
+print("parent_asin" in meta.columns, len(meta))
+
+# COMMAND ----------
+
 
