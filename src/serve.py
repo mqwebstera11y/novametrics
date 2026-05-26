@@ -873,7 +873,7 @@ async function getRecommendations() {
 
     data.forEach((item, i) => {
       const poster = item.poster_url
-        ? '<img class="result-poster" src="' + item.poster_url + '" alt="poster" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'"/><div class="result-poster-placeholder" style="display:none">🎬</div>'
+        ? '<img class="result-poster" src="' + item.poster_url + '" alt="poster" onerror="this.style.display=`none`;this.nextElementSibling.style.display=`flex`"/><div class="result-poster-placeholder" style="display:none">🎬</div>'
         : '<div class="result-poster-placeholder">🎬</div>';
 
       html += '<div class="result-card" style="animation-delay:' + (i * 0.07) + 's">' +
