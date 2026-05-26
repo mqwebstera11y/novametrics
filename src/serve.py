@@ -770,9 +770,8 @@ def root():
   </p>
 
   <div class="search-wrap">
-    <input type="text" id="movieInput" placeholder="e.g. The Dark Knight, Inception, Parasite"
-           onkeydown="if(event.key==='Enter') getRecommendations()"/>
-    <button class="search-btn" onclick="getRecommendations()" id="searchBtn">Recommend</button>
+    <input type="text" id="movieInput" placeholder="e.g. The Dark Knight, Inception, Parasite"/>
+    <button class="search-btn" id="searchBtn">Recommend</button>
   </div>
   <p class="hint">Separate multiple titles with commas</p>
 
@@ -910,6 +909,11 @@ async function loadExperiment() {
 }
 
 loadExperiment();
+
+document.getElementById('searchBtn').addEventListener('click', getRecommendations);
+document.getElementById('movieInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') getRecommendations();
+});
 </script>
 </body>
 </html>""")
