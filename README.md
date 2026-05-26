@@ -72,18 +72,6 @@ novametrics/
 └── .github/workflows/ci.yml
 ```
 
----
-
-## Key Results
-
-| Metric | Value |
-|--------|-------|
-| Retention lift | +3.5pp (p=0.0001) |
-| LTV incremental | +$5.93 per user |
-| CF RMSE | 0.9947 |
-| CF NDCG@10 | 0.8827 |
-| Items embedded | 433,586 |
-| Unit tests | 38 / 38 passing |
 
 ---
 
@@ -102,7 +90,7 @@ TMDB API — poster images and metadata enrichment.
 
 ## Limitations
 
-This is a retrospective simulation, not a live experiment. Retention is proxied by continued rating activity. Churn rate (5%) and CAC ($40) are documented assumptions. Full limitations in `docs/product_memo.md`.
+This is a retrospective simulation, not a live experiment. Retention is proxied by continued rating activity. Churn rate (5%) and CAC ($40) are documented assumptions. 
 
 ---
 
