@@ -32,6 +32,7 @@ import pandas as pd
 import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 sys.path.append(os.path.dirname(__file__))
@@ -288,3 +289,627 @@ def experiment_results():
     if not state.get("ready"):
         raise HTTPException(status_code=503, detail="Artifacts not loaded yet.")
     return state["experiment_results"]
+
+
+@app.get("/", response_class=HTMLResponse)
+def root():
+    return HTMLResponse(content="""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Project Nova</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #080c12;
+    --surface:  #0e1420;
+    --card:     #131a28;
+    --border:   #1e2d45;
+    --gold:     #c9a84c;
+    --gold2:    #e8c97a;
+    --text:     #e8e4dc;
+    --muted:    #7a8499;
+    --green:    #4caf7d;
+    --red:      #e05c5c;
+    --blue:     #4a8fe8;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 300;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── GRAIN OVERLAY ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.4;
+  }
+
+  /* ── HERO ── */
+  .hero {
+    position: relative;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 4rem 2rem;
+    text-align: center;
+    background:
+      radial-gradient(ellipse 80% 60% at 50% 0%, rgba(201,168,76,0.08) 0%, transparent 70%),
+      radial-gradient(ellipse 60% 40% at 80% 100%, rgba(74,143,232,0.06) 0%, transparent 60%);
+  }
+
+  .badge {
+    display: inline-block;
+    border: 1px solid var(--gold);
+    color: var(--gold);
+    font-size: 0.7rem;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    padding: 0.35rem 1rem;
+    border-radius: 2px;
+    margin-bottom: 2rem;
+    animation: fadeUp 0.8s ease both;
+  }
+
+  h1 {
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(3rem, 8vw, 7rem);
+    font-weight: 900;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin-bottom: 1.5rem;
+    animation: fadeUp 0.8s 0.1s ease both;
+  }
+
+  h1 span {
+    background: linear-gradient(135deg, var(--gold) 0%, var(--gold2) 50%, var(--gold) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .hero-sub {
+    font-size: clamp(1rem, 2vw, 1.2rem);
+    color: var(--muted);
+    max-width: 560px;
+    line-height: 1.7;
+    margin-bottom: 3rem;
+    animation: fadeUp 0.8s 0.2s ease both;
+  }
+
+  .stat-row {
+    display: flex;
+    gap: 2.5rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 3.5rem;
+    animation: fadeUp 0.8s 0.3s ease both;
+  }
+
+  .stat {
+    text-align: center;
+  }
+
+  .stat-val {
+    font-family: 'Playfair Display', serif;
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: var(--gold);
+    display: block;
+    line-height: 1;
+  }
+
+  .stat-lbl {
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 0.35rem;
+  }
+
+  .scroll-hint {
+    position: absolute;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--muted);
+    font-size: 0.72rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    animation: fadeUp 1s 0.6s ease both;
+  }
+
+  .scroll-hint::after {
+    content: '';
+    width: 1px;
+    height: 40px;
+    background: linear-gradient(to bottom, var(--muted), transparent);
+    animation: scrollLine 1.5s ease infinite;
+  }
+
+  /* ── DEMO SECTION ── */
+  .demo-section {
+    position: relative;
+    padding: 6rem 2rem;
+    max-width: 760px;
+    margin: 0 auto;
+  }
+
+  .section-label {
+    font-size: 0.7rem;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 1rem;
+  }
+
+  .section-title {
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(1.8rem, 4vw, 2.8rem);
+    font-weight: 700;
+    margin-bottom: 0.75rem;
+    line-height: 1.15;
+  }
+
+  .section-desc {
+    color: var(--muted);
+    font-size: 1rem;
+    line-height: 1.7;
+    margin-bottom: 2.5rem;
+  }
+
+  /* ── SEARCH ── */
+  .search-wrap {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+
+  input[type="text"] {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 1rem;
+    font-weight: 300;
+    padding: 0.9rem 1.2rem;
+    border-radius: 4px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  input[type="text"]:focus { border-color: var(--gold); }
+  input[type="text"]::placeholder { color: var(--muted); }
+
+  button.search-btn {
+    background: var(--gold);
+    color: #080c12;
+    border: none;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.9rem 1.8rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+    white-space: nowrap;
+  }
+
+  button.search-btn:hover { background: var(--gold2); }
+  button.search-btn:active { transform: scale(0.98); }
+  button.search-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .hint {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-bottom: 2rem;
+  }
+
+  /* ── RESULTS ── */
+  #results { min-height: 2rem; }
+
+  .loading {
+    color: var(--muted);
+    font-size: 0.9rem;
+    padding: 1rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .spinner {
+    width: 18px; height: 18px;
+    border: 2px solid var(--border);
+    border-top-color: var(--gold);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  .result-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 0.75rem;
+    display: flex;
+    gap: 1.25rem;
+    align-items: flex-start;
+    animation: fadeUp 0.4s ease both;
+    transition: border-color 0.2s;
+  }
+
+  .result-card:hover { border-color: rgba(201,168,76,0.4); }
+
+  .result-poster {
+    width: 52px;
+    height: 76px;
+    object-fit: cover;
+    border-radius: 3px;
+    flex-shrink: 0;
+    background: var(--surface);
+  }
+
+  .result-poster-placeholder {
+    width: 52px;
+    height: 76px;
+    background: var(--surface);
+    border-radius: 3px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--border);
+    font-size: 1.4rem;
+  }
+
+  .result-info { flex: 1; min-width: 0; }
+
+  .result-rank {
+    font-size: 0.68rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 0.3rem;
+  }
+
+  .result-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.05rem;
+    font-weight: 700;
+    line-height: 1.3;
+    margin-bottom: 0.4rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .result-reason {
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+
+  .result-score {
+    font-size: 0.85rem;
+    color: var(--gold);
+    font-weight: 500;
+    white-space: nowrap;
+    margin-top: 0.2rem;
+  }
+
+  .error-msg {
+    color: var(--red);
+    font-size: 0.9rem;
+    padding: 0.75rem 0;
+  }
+
+  /* ── EXPERIMENT SECTION ── */
+  .experiment-section {
+    position: relative;
+    padding: 6rem 2rem;
+    max-width: 760px;
+    margin: 0 auto;
+    border-top: 1px solid var(--border);
+  }
+
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 2rem;
+  }
+
+  .metric-cell {
+    background: var(--card);
+    padding: 1.5rem;
+  }
+
+  .metric-cell-label {
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+  }
+
+  .metric-cell-val {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.9rem;
+    font-weight: 700;
+    color: var(--gold);
+    line-height: 1;
+  }
+
+  .metric-cell-val.green { color: var(--green); }
+  .metric-cell-val.blue  { color: var(--blue); }
+
+  .metric-cell-sub {
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-top: 0.35rem;
+  }
+
+  .verdict-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--gold);
+    padding: 1.25rem 1.5rem;
+    border-radius: 4px;
+    font-size: 0.95rem;
+    line-height: 1.7;
+    color: var(--text);
+    font-style: italic;
+  }
+
+  /* ── FOOTER ── */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 2rem;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.78rem;
+    letter-spacing: 0.05em;
+  }
+
+  footer a { color: var(--muted); text-decoration: none; }
+  footer a:hover { color: var(--gold); }
+
+  /* ── DIVIDER LINE ── */
+  .h-line {
+    width: 48px;
+    height: 1px;
+    background: var(--gold);
+    margin: 1.5rem 0;
+    opacity: 0.6;
+  }
+
+  /* ── ANIMATIONS ── */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  @keyframes scrollLine {
+    0%   { opacity: 0; transform: scaleY(0); transform-origin: top; }
+    50%  { opacity: 1; transform: scaleY(1); transform-origin: top; }
+    100% { opacity: 0; transform: scaleY(1); transform-origin: bottom; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── HERO ── -->
+<section class="hero">
+  <div class="badge">Project Nova &nbsp;·&nbsp; Movie Personalisation Engine</div>
+  <h1>Does personalisation<br><span>move the needle?</span></h1>
+  <p class="hero-sub">
+    A hybrid recommendation system with an embedded A/B experiment framework
+    and 12-month LTV model — built to answer one product question.
+  </p>
+
+  <div class="stat-row">
+    <div class="stat">
+      <span class="stat-val">+3.5pp</span>
+      <span class="stat-lbl">Retention lift</span>
+    </div>
+    <div class="stat">
+      <span class="stat-val">p=0.0001</span>
+      <span class="stat-lbl">Significance</span>
+    </div>
+    <div class="stat">
+      <span class="stat-val">+$5.93</span>
+      <span class="stat-lbl">LTV / user</span>
+    </div>
+    <div class="stat">
+      <span class="stat-val">433K</span>
+      <span class="stat-lbl">Items embedded</span>
+    </div>
+  </div>
+
+  <div class="scroll-hint">Try it below</div>
+</section>
+
+<!-- ── DEMO ── -->
+<section class="demo-section">
+  <p class="section-label">Live Demo</p>
+  <h2 class="section-title">Find your next watch</h2>
+  <div class="h-line"></div>
+  <p class="section-desc">
+    Type a movie you've enjoyed. Under 10 titles triggers the content-based engine (FAISS semantic search).
+    10 or more switches to collaborative filtering (SVD).
+  </p>
+
+  <div class="search-wrap">
+    <input type="text" id="movieInput" placeholder="e.g. The Dark Knight, Inception, Parasite"
+           onkeydown="if(event.key==='Enter') getRecommendations()"/>
+    <button class="search-btn" onclick="getRecommendations()" id="searchBtn">Recommend</button>
+  </div>
+  <p class="hint">Separate multiple titles with commas</p>
+
+  <div id="results"></div>
+</section>
+
+<!-- ── EXPERIMENT ── -->
+<section class="experiment-section">
+  <p class="section-label">A/B Experiment Results</p>
+  <h2 class="section-title">Does it work?</h2>
+  <div class="h-line"></div>
+  <p class="section-desc">
+    Retrospective simulation on 10,000 users. Personalised recommendations
+    during onboarding vs. popularity baseline. Day-30 retention measured.
+  </p>
+
+  <div class="metrics-grid">
+    <div class="metric-cell">
+      <div class="metric-cell-label">Control retention</div>
+      <div class="metric-cell-val">32.1%</div>
+      <div class="metric-cell-sub">Popularity baseline</div>
+    </div>
+    <div class="metric-cell">
+      <div class="metric-cell-label">Treatment retention</div>
+      <div class="metric-cell-val green">35.7%</div>
+      <div class="metric-cell-sub">Personalised recs</div>
+    </div>
+    <div class="metric-cell">
+      <div class="metric-cell-label">Retention lift</div>
+      <div class="metric-cell-val green">+3.5pp</div>
+      <div class="metric-cell-sub">p=0.0001, z=3.72</div>
+    </div>
+    <div class="metric-cell">
+      <div class="metric-cell-label">LTV incremental</div>
+      <div class="metric-cell-val">+$5.93</div>
+      <div class="metric-cell-sub">Per user, 12-month</div>
+    </div>
+    <div class="metric-cell">
+      <div class="metric-cell-label">LTV — control</div>
+      <div class="metric-cell-val">$5.46</div>
+      <div class="metric-cell-sub">12-month projection</div>
+    </div>
+    <div class="metric-cell">
+      <div class="metric-cell-label">LTV — treatment</div>
+      <div class="metric-cell-val green">$11.39</div>
+      <div class="metric-cell-sub">12-month projection</div>
+    </div>
+  </div>
+
+  <div class="verdict-box" id="verdictBox">
+    "Treatment improves 30-day retention by +3.5pp (32.1% → 35.7%).
+    Result is statistically significant (z=3.72, p=0.0001, α=0.05)."
+  </div>
+</section>
+
+<!-- ── FOOTER ── -->
+<footer>
+  <p>Project Nova &nbsp;·&nbsp; Built with FastAPI · FAISS · SVD · Databricks</p>
+  <p style="margin-top:0.5rem;">
+    Data: <a href="https://amazon-reviews-2023.github.io/" target="_blank">Amazon Reviews 2023</a>
+    (McAuley Lab, UCSD) &nbsp;·&nbsp; Non-commercial research use only
+  </p>
+</footer>
+
+<script>
+async function getRecommendations() {
+  const input = document.getElementById('movieInput').value.trim();
+  if (!input) return;
+
+  const movies = input.split(',').map(m => m.trim()).filter(Boolean);
+  const btn    = document.getElementById('searchBtn');
+  const res    = document.getElementById('results');
+
+  btn.disabled = true;
+  res.innerHTML = '<div class="loading"><div class="spinner"></div>Finding recommendations...</div>';
+
+  try {
+    const resp = await fetch('/recommend', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ watched_movies: movies, n_items: 5 })
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json();
+      res.innerHTML = '<p class="error-msg">Error: ' + (err.detail || resp.statusText) + '</p>';
+      return;
+    }
+
+    const data = await resp.json();
+
+    if (!data.length) {
+      res.innerHTML = '<p class="error-msg">No results found. Try different movie titles.</p>';
+      return;
+    }
+
+    const pipeline = movies.length < 10 ? 'Content-Based (FAISS)' : 'Collaborative Filtering (SVD)';
+    let html = '<p class="hint" style="margin-bottom:1rem;">Pipeline: <strong style="color:var(--gold)">' + pipeline + '</strong></p>';
+
+    data.forEach((item, i) => {
+      const poster = item.poster_url
+        ? '<img class="result-poster" src="' + item.poster_url + '" alt="poster" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'"/><div class="result-poster-placeholder" style="display:none">🎬</div>'
+        : '<div class="result-poster-placeholder">🎬</div>';
+
+      html += '<div class="result-card" style="animation-delay:' + (i * 0.07) + 's">' +
+        poster +
+        '<div class="result-info">' +
+          '<div class="result-rank">Rank ' + (i + 1) + '</div>' +
+          '<div class="result-title">' + item.title + '</div>' +
+          '<div class="result-reason">' + item.reason + '</div>' +
+          '<div class="result-score">Score: ' + item.score.toFixed(3) + '</div>' +
+        '</div>' +
+      '</div>';
+    });
+
+    res.innerHTML = html;
+
+  } catch (e) {
+    res.innerHTML = '<p class="error-msg">Network error. Is the server running?</p>';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Load live experiment results
+async function loadExperiment() {
+  try {
+    const resp = await fetch('/experiment/results');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data.verdict) {
+      document.getElementById('verdictBox').textContent = '"' + data.verdict + '"';
+    }
+  } catch(e) {}
+}
+
+loadExperiment();
+</script>
+</body>
+</html>""")
