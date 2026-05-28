@@ -1,6 +1,5 @@
 """
 serve.py — FastAPI serving layer for Project Nova.
-
 Three endpoints:
     GET  /ping                — health check / server wake
     POST /recommend           — hybrid CB/CF recommendations
