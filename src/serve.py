@@ -1,5 +1,6 @@
 """
 serve.py — FastAPI serving layer for Project Nova.
+
 Three endpoints:
     GET  /ping                — health check / server wake
     POST /recommend           — hybrid CB/CF recommendations
@@ -135,6 +136,7 @@ def _meta_lookup(parent_asin: str) -> dict:
 
 def _cb_recommend(seed_titles: list[str], n: int) -> list:
     meta = state["meta"]
+    seed_titles_input = seed_titles  # keep original for dedup
     seed_indices = []
     for title in seed_titles:
         matches = meta[meta["title"].str.contains(title, case=False, na=False)]
@@ -158,11 +160,14 @@ def _cb_recommend(seed_titles: list[str], n: int) -> list:
         """Normalise title for dedup — lowercase, strip edition/format suffixes."""
         import re
         t = t.lower().strip()
-        # Remove common format suffixes
-        t = re.sub(r'\s*[\(\[].*?[\)\]]', '', t)   # strip (anything) and [anything]
+        t = re.sub(r'\s*[\(\[].*?[\)\]]', '', t)
         t = re.sub(r'\s*(dvd|blu.ray|4k|uhd|steelbook|widescreen|special edition|limited edition|bonus content|digital|theatrical)\s*', '', t, flags=re.I)
         t = re.sub(r'\s+', ' ', t).strip()
         return t
+
+    # Pre-populate seen_titles with the seed movie titles
+    for title in seed_titles_input:
+        seen_titles.add(_norm_title(title))
 
     for dist, idx in zip(dists[0], idxs[0]):
         if int(idx) in seen_indices:
