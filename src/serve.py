@@ -149,15 +149,36 @@ def _cb_recommend(seed_titles: list[str], n: int) -> list:
         seed_indices = [0]
 
     query_vec = state["embeddings"][seed_indices].mean(axis=0).reshape(1, -1).astype(np.float32)
-    dists, idxs = query_index(state["index"], query_vec, k=n + len(seed_indices) + 5)
+    dists, idxs = query_index(state["index"], query_vec, k=n * 10 + len(seed_indices))
 
     results = []
-    seen = set(seed_indices)
+    seen_indices = set(seed_indices)
+    seen_titles  = set()
+
+    def _norm_title(t: str) -> str:
+        """Normalise title for dedup — lowercase, strip edition/format suffixes."""
+        import re
+        t = t.lower().strip()
+        # Remove common format suffixes
+        t = re.sub(r'\s*[\(\[].*?[\)\]]', '', t)   # strip (anything) and [anything]
+        t = re.sub(r'\s*(dvd|blu.ray|4k|uhd|steelbook|widescreen|special edition|limited edition|bonus content|digital|theatrical)\s*', '', t, flags=re.I)
+        t = re.sub(r'\s+', ' ', t).strip()
+        return t
+
     for dist, idx in zip(dists[0], idxs[0]):
-        if int(idx) in seen:
+        if int(idx) in seen_indices:
             continue
-        asin = state["all_asins"][int(idx)]
-        m    = _meta_lookup(asin)
+        asin  = state["all_asins"][int(idx)]
+        m     = _meta_lookup(asin)
+        norm  = _norm_title(m["title"])
+
+        # Skip if normalised title already shown
+        if norm in seen_titles:
+            continue
+
+        seen_indices.add(int(idx))
+        seen_titles.add(norm)
+
         results.append({
             "movie_id":   asin,
             "title":      m["title"],
@@ -601,9 +622,7 @@ def root():
     font-weight: 700;
     line-height: 1.3;
     margin-bottom: 0.4rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    word-break: break-word;
   }
 
   .result-reason {
